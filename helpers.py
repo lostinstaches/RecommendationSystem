@@ -5,6 +5,7 @@ from itertools import groupby
 
 import numpy as np
 import scipy.sparse as sp
+import pandas as pd
 
 
 def read_txt(path):
@@ -101,7 +102,7 @@ def split_data(ratings, num_items_per_user, num_users_per_item,
     print("Total number of nonzero elements in origial data:{v}".format(v=ratings.nnz))
     print("Total number of nonzero elements in train data:{v}".format(v=train.nnz))
     print("Total number of nonzero elements in test data:{v}".format(v=test.nnz))
-    return valid_ratings, train, test
+    return valid_ratings, train, test, valid_users, valid_items
 
 
 def init_MF(train, num_features):
@@ -148,3 +149,29 @@ def create_submission_baseline_estimate(user_bias, item_bias, global_bias):
             p_string = "r{}_c{},{}\n".format(row, col, prediction)
             out.write(p_string)        
     out.close()
+
+def load_data(path):
+    data_df = pd.read_csv(path)
+    data_df['user'] = data_df['Id'].str.split('_').str[1].apply(lambda x: int(x[1:]))
+    data_df['item'] = data_df['Id'].str.split('_').str[0].apply(lambda x: int(x[1:]))
+    data_df = data_df.rename(columns={'Prediction':'rating'})
+    data_df = data_df[['user','item','rating']]
+    return data_df
+
+
+def rmse(predictions, label):
+    return np.sqrt(np.mean((predictions - label) ** 2))
+
+def get_submission_rows():
+    users = []
+    items = []
+    with open('./data/submission_rows') as samples:
+        for i, sample in enumerate(samples):
+            if i == 0:
+                continue
+            tmp = sample.split('_')
+            item = int(tmp[0][1:].strip())
+            user = int(tmp[1][1:].strip())
+            users.append(user)
+            items.append(item)
+    return pd.DataFrame.from_dict({'user': users, 'item': items})
