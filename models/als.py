@@ -7,40 +7,31 @@ from pyspark import SQLContext
 from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
 from pyspark.ml import Pipeline
 from sklearn.model_selection import ParameterGrid
+from pyspark.mllib.recommendation import Rating
 import pandas as pd
 import random
-#from pyspark.mllib.recommendation import ALS
 
+
+# A wrapper class for the pyspark ALS algorithm implmenetation
 
 class ALS_Classifier: 
-    def __init__(self, sc):
+    def __init__(self, sc, numIterations=60, rank=11, regParam=0.09):
         sc.setCheckpointDir('checkpoint/')
         self.spark = SQLContext(sc)
         self.sc = sc        
-        #self.rank = 8
-        #self.regParam = 0.06
-        #self.numIterations = 60
-        #self.regParam = 0.06
-        self.numIterations = 60
-        self.regParam = 0.09
-        self.rank = 11
+        self.regParam = regParam
+        self.rank = rank
+        self.numIterations = numIterations
         self.evaluator = RegressionEvaluator(metricName="rmse", labelCol="rating", predictionCol="prediction")
-
-        """
-        self.clf = ALS(rank=8, 
-              maxIter=50, 
-              regParam=0.01,
-              userCol="user", 
-              itemCol="item", 
-              ratingCol="rating",
-              checkpointInterval=10, 
-              intermediateStorageLevel="MEMORY_AND_DISK", 
-              finalStorageLevel="MEMORY_AND_DISK")
-        """
-        
         
     def fit(self, data):
-        from pyspark.mllib.recommendation import Rating
+        """ Fits the ALS model to training data
+            input:      data           -training data  
+                        tx          -feature matrix
+                        w           -weight vector
+
+            output:     l           -the loss when predicting the labels of the samples in tx using weight vector w 
+        """
         from pyspark.mllib.recommendation import ALS
         schema = StructType([ StructField("user", IntegerType(), True)\
                        ,StructField("item", IntegerType(), True)\
@@ -48,17 +39,13 @@ class ALS_Classifier:
         ratings = self.spark.createDataFrame(data, schema=schema)
         print(ratings.show())
         self.clf = ALS.train(ratings, self.rank, self.numIterations, self.regParam, seed=0)
-
-        """
-        schema = StructType([ StructField("user", IntegerType(), True)\
-                       ,StructField("item", IntegerType(), True)\
-                       ,StructField("rating", IntegerType(), True)])
-        ratings = self.spark.createDataFrame(data, schema=schema)
-        self.model = self.clf.fit(ratings)
-        """
-        
+    
     def predict(self, test):
-        
+        """ Create predictions for the (user, item) pairs of the test set.
+            input:      test           -the test set to predict
+
+            output:                    -the predicted ratings as a pandas dataframe
+        """
         test = test[['user', 'item']]
         schema = StructType([ StructField("user", IntegerType(), True)\
                        ,StructField("item", IntegerType(), True)])
@@ -67,42 +54,46 @@ class ALS_Classifier:
             .map(lambda r: ((r[0], r[1]), r[2]))\
             .toDF()\
             .toPandas()
-        print("SHAPE INSIDE")
-        print(test_pred.shape)
         test_pred['user'] = test_pred['_1'].apply(lambda x: x['_1'])
         test_pred['item'] = test_pred['_1'].apply(lambda x: x['_2'])
         test_pred['est'] = test_pred['_2']
         test_pred = test_pred.drop(['_1', '_2'], axis=1)
         test_pred = test_pred.sort_values(by=['user', 'item'])
         test_pred.index = range(len(test_pred))
-        """
-        schema = StructType([ StructField("user", IntegerType(), True)\
-                       ,StructField("item", IntegerType(), True)\
-                       ,StructField("rating", IntegerType(), True)])
-        ratings = self.spark.createDataFrame(test,schema=schema)
-        p = self.model.transform(ratings).toPandas()
-        test_pred = p.rename(columns={'user': 'user', 'item': 'item', 'rating': 'r_ui', 'prediction': 'est'})
-        test_pred = test_pred.sort_values(['user','item'],ascending=[True, True])
-        """
         return test_pred
     def predictOne(self, user, item):
+        """ Create predictions for a single (user, item) pair
+            input:      user           -the user associated with the predicition
+                        item           -the item associated with the predicition
+
+            output:                    -the predicted rating
+
+        """
         p = self.sc.parallelize([(user, item)])
         prediction = self.clf.predictAll(p)\
             .map(lambda r: ((r[0], r[1]), r[2]))\
             .toDF()\
             .toPandas()
         return prediction['_2']
-    def crossValidate_normal(self, data):
-        self.model = self.clf.fit(data, seed=10)
-    def predict_normal(self, test):
-        p = self.model.transform(test)
-        return p
     def rmse(self, predictions):
-        return self.evaluator.evaluate(predictions)
-    def predict_value(self, user, item):
-        return 
+        """ Calculates the RMSE of the predictions given as argument
+            input:      predictions    -the predictions to include in the RMSE calculations
 
-    def grid_search(self, train, test):
+            output:                    -the rmse of the predictions
+        """
+        return self.evaluator.evaluate(predictions)
+
+    def grid_search(self, train, test, param_grid, outputFileName="als_grid.csv"):
+        """ Performs a grid search on the ALS model using the trainset for crossvalidation and uses the test set to make final predictions.
+            The reason why we use a seperate test set is because it does not appear to be possible (at least we have not found out how to do it)
+            to extract the rmse score of from the pyspark crossvalidation function. Therefore we decided to use a seperate test set which we use to approximate the rmse
+            when using the crossValidate function of pyspark
+
+            Saves the output of the cross validation to the file system as a csv file.
+
+            input:      train          -train           set to perform cross-validation on
+                        train          -outputFileName  the name of the output file
+        """
 
         schema = StructType([ StructField("user", IntegerType(), True)\
                        ,StructField("item", IntegerType(), True)\
@@ -116,10 +107,7 @@ class ALS_Classifier:
         ranks = []
         regParams = []
         rmses = []
-        param_grid = {'rank': [11],
-                      'regParam' : [0.07,0.08,0.09,0.1,0.11,0.12]}
         grid = ParameterGrid(param_grid)
-        #testdata = test.rdd.map(lambda p: (p[0], p[1]))
         for params in grid:
             regParam = params['regParam']
             rank = params['rank']
@@ -134,7 +122,7 @@ class ALS_Classifier:
             crossval = CrossValidator(estimator=als,
                         estimatorParamMaps=paramGrid,
                         evaluator=evaluator,
-                        numFolds=3)
+                        numFolds=5)
             cvModel = crossval.fit(train)
             prediction = cvModel.transform(test)
             rmse = evaluator.evaluate(prediction)
@@ -143,4 +131,4 @@ class ALS_Classifier:
             regParams.append(regParam)
             rmses.append(rmse)
         df = pd.DataFrame.from_dict({'rank': ranks, 'reg': regParams, 'rmse': rmses})
-        df.to_csv('als_grid_4_reg.csv')
+        df.to_csv(outputFileName)
