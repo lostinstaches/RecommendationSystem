@@ -1,10 +1,11 @@
 
 from helpers import load_data
 from surprise import Reader
-from surprise import SVD
+from surprise import KNNBaseline
 from surprise import Dataset
 from surprise.model_selection import GridSearchCV
 import pandas as pd
+
 
 def grid_search(data, param_grid, algo, folds):
     gs = GridSearchCV(algo, 
@@ -20,15 +21,15 @@ def main():
     data = load_data('./data/de_data_train.csv')
     reader = Reader(rating_scale=(1, 5))
     surprise_data = Dataset.load_from_df(data, reader=reader)
-    param_grid = {'n_epochs': [60],
-              'n_factors': [5,10,15,20,25,30],
-              'reg_all': [0.1, 0.01],
-              'lr_all': [0.01, 0.001]}
+    param_grid = {'bsl_options' : {'method' : ['als'], 'n_epochs' : [20]},
+                  'sim_options': {'name' : ['msd','cosine', 'pearson', 'pearson_baseline'], 'min_support' : [1,5], 'shrinkage':[100],
+                                'k':[20,40,100]}
+
+    }
     reader = Reader(rating_scale=(1, 5))
     surprise_data = Dataset.load_from_df(data, reader=reader)
-    gs = grid_search(data=surprise_data, param_grid=param_grid, algo=SVD,folds=5)
-    print(gs.best_score['rmse'])    
-    pd.DataFrame.from_dict(gs.cv_results).to_csv('svd_train_v8.csv')
+    gs = grid_search(data=surprise_data, param_grid=param_grid, algo=KNNBaseline,folds=5)
+    pd.DataFrame.from_dict(gs.cv_results).to_csv('knn_train.csv')
 
 if __name__ == "__main__":
     main()
