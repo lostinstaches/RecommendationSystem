@@ -6,7 +6,7 @@ Our best performing model is an ensemble model and yielded a RMSE of 1.021 on th
 
 `python run.py`
 
-Produce a submission file for the EPFL CrowdAi Challange:
+Produce a submission file for the EPFL CrowdAi Challenge:
 
 `python run.py`
 
